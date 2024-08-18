@@ -2,7 +2,8 @@
 
 module Main where
 
-import Control.Applicative ((<**>))
+import Control.Monad.Reader (ReaderT (runReaderT), asks, liftIO)
+import Credentials (Credentials (bkToken), getPassword, getToken, getUser, loadCreds, optParser)
 import Data.Aeson (FromJSON)
 import Data.Aeson.Decoding (decode)
 import Data.Aeson.Types (Value)
@@ -17,7 +18,6 @@ import Network.HTTP.Client (redirectCount)
 import Network.HTTP.Client.Conduit (responseHeaders)
 import Network.HTTP.Simple
 import qualified Options.Applicative as OA
-import System.Environment (getEnv)
 
 rootUrl :: String
 rootUrl = "https://api.buildkite.com/"
@@ -37,14 +37,15 @@ doMain build_id creds = do
 
     putStrLn $ "getting build details for " <> build_id
 
-    decoded <- getWithToken req token
+    decoded <- fetchWithToken req
     let failed = failedJobs <$> decoded
         artifacts = maybe [] artifactUrls failed
 
     putStrLn $ "Found " <> (show . length) artifacts <> " failed jobs"
 
     artRequests <- mapM makeGetRequest artifacts
-    artResponses <- mapM (`getWithToken` token) artRequests
+    artResponses <- mapM fetchWithToken artRequests
+
     let allArtResp = concatMap (fromMaybe []) artResponses
         htmlReports = filter (("vbuild/ducktape/results/final/report.html" ==) . artPath) allArtResp
     htmlReqs <- mapM (makeGetRequest . artDlUrl) htmlReports
@@ -52,29 +53,25 @@ doMain build_id creds = do
 
     mapM_ getArtSummary $ concat redirectedArtUrls
   where
-    token = pack $ bkToken creds
-    user = pack $ bkUser creds
-    passwd = pack $ bkPasswd creds
+    fetchWithToken request = runReaderT (getWithToken request) creds
     failedJobs response = filter (("failed" ==) . state) $ jobs response
     artifactUrls = map artifactsUrl
-    getArtSummary u = printTestSummaries u user passwd
-    fetchRedirected req =
-      getRedirectTargets req (pack $ bkToken creds)
+    getArtSummary u = runReaderT (printTestSummaries u) creds
+    fetchRedirected req = runReaderT (getRedirectTargets req) creds
 
-getWithToken :: (FromJSON a) => Request -> ByteString -> IO (Maybe a)
-getWithToken request token = do
-  let req = setRequestBearerAuth token request
-  response <- httpLBS req
+getWithToken :: (FromJSON a) => Request -> ReaderT Credentials IO (Maybe a)
+getWithToken request = do
+  token <- asks getToken
+  response <- httpLBS $ setRequestBearerAuth token request
   pure $ decode $ getResponseBody response
 
-getRedirectTargets :: Request -> ByteString -> IO [ByteString]
-getRedirectTargets request token = do
+getRedirectTargets :: Request -> ReaderT Credentials IO [ByteString]
+getRedirectTargets request = do
+  token <- asks getToken
   let reqWithAuth = setRequestBearerAuth token request
       noRedirectReq = reqWithAuth {redirectCount = 0}
-  response <- httpJSON noRedirectReq :: IO (Response Value)
-  let locationHeader = filter ((== "Location") . fst) $ responseHeaders response
-      locs = map snd locationHeader
-  return locs
+  response <- liftIO (httpJSON noRedirectReq :: IO (Response Value))
+  pure $ map snd $ filter ((== "Location") . fst) $ responseHeaders response
 
 extractTestsFromHtmlResponse :: BS.ByteString -> [TestRun]
 extractTestsFromHtmlResponse responseData =
@@ -85,44 +82,20 @@ extractTestsFromHtmlResponse responseData =
       validJson = map (reverse . drop 3 . reverse) stripped
    in mapMaybe ((\c -> decode c :: Maybe TestRun) . BS.pack) validJson
 
-printTestSummaries :: ByteString -> ByteString -> ByteString -> IO ()
-printTestSummaries artUrl user passwd = do
-  putStrLn $ "Fetching " <> unpack artUrl
-
-  artRequest <- makeGetRequest $ unpack artUrl
-  let reqWithAuth = setRequestBasicAuth user passwd artRequest
+printTestSummaries :: ByteString -> ReaderT Credentials IO ()
+printTestSummaries artUrl = do
+  liftIO $ putStrLn $ "Fetching " <> unpack artUrl
+  artRequest <- liftIO $ makeGetRequest $ unpack artUrl
+  user <- asks getUser
+  password <- asks getPassword
+  let reqWithAuth = setRequestBasicAuth user password artRequest
   response <- httpLBS reqWithAuth
 
-  putStrLn $ "Fetched... " <> show (getResponseStatus response)
-  mapM_ (putStrLn . testName) $ extractTestsFromHtmlResponse $ getResponseBody response
+  liftIO $ putStrLn $ "Fetched... " <> show (getResponseStatus response)
+  mapM_ (liftIO . putStrLn . testName) $ extractTestsFromHtmlResponse $ getResponseBody response
 
 main :: IO ()
 main = do
   cmdOpts <- OA.execParser optParser
   creds <- loadCreds
   doMain (buildId cmdOpts) creds
-
-buildOpts :: OA.Parser CmdOpts
-buildOpts =
-  CmdOpts
-    <$> OA.strOption (OA.long "build-id" <> OA.short 'b' <> OA.metavar "BUILD_ID" <> OA.help "Buildkite build ID")
-    <*> OA.switch (OA.long "show-all" <> OA.short 'a' <> OA.help "Whether to show all results or only the failed ones")
-
-optParser :: OA.ParserInfo CmdOpts
-optParser =
-  OA.info
-    (buildOpts <**> OA.helper)
-    (OA.fullDesc <> OA.progDesc "Summarize tests in a buildkite build!" <> OA.header "show-build-summary")
-
-data Credentials = Credentials
-  { bkToken :: String,
-    bkUser :: String,
-    bkPasswd :: String
-  }
-
-loadCreds :: IO Credentials
-loadCreds =
-  Credentials
-    <$> getEnv "BK_TOK"
-    <*> getEnv "BK_USR"
-    <*> getEnv "BK_PASS"

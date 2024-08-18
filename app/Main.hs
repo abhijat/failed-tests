@@ -3,7 +3,7 @@
 module Main where
 
 import Control.Monad.Reader (ReaderT (runReaderT), asks, liftIO)
-import Credentials (Credentials (bkToken), getPassword, getToken, getUser, loadCreds, optParser)
+import Credentials (Credentials, getPassword, getToken, getUser, loadCreds, optParser)
 import Data.Aeson (FromJSON)
 import Data.Aeson.Decoding (decode)
 import Data.Aeson.Types (Value)

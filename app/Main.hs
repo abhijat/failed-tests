@@ -8,11 +8,7 @@ import Data.Aeson (FromJSON, Value)
 import Data.Aeson.Decoding (decode)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (pack, unpack)
-import qualified Data.ByteString.Lazy.Char8 as BS
-import Data.List (isInfixOf)
 import Data.Maybe (fromJust, fromMaybe)
-import Data.String.Utils (replace, strip)
-import Debug.Trace (trace)
 import Entities
 import Network.HTTP.Client (redirectCount)
 import Network.HTTP.Client.Conduit (responseHeaders)
@@ -24,9 +20,8 @@ rootUrl :: String
 rootUrl = "https://api.buildkite.com/"
 
 reportPattern :: String
-reportPattern = "vbuild/ducktape/results/.*/report.html"
+reportPattern = "vbuild/ducktape/results/.*/report.json"
 
--- 52960
 buildPath :: String -> String -> ByteString
 buildPath build_id org_id = pack $ orgUrl <> build_id
   where
@@ -54,9 +49,9 @@ doMain build_id org_id creds = do
     artResponses <- mapM fetchWithToken artRequests
 
     let allArtResp = concatMap (fromMaybe []) artResponses
-        htmlReports = filter (matchesReportPath . artPath) allArtResp
-    htmlReqs <- mapM (makeGetRequest . artDlUrl) htmlReports
-    redirectedArtUrls <- mapM fetchRedirected htmlReqs
+        jsonReports = filter (matchesReportPath . artPath) allArtResp
+    jsonGets <- mapM (makeGetRequest . artDlUrl) jsonReports
+    redirectedArtUrls <- mapM fetchRedirected jsonGets
 
     mapM_ getArtSummary $ concat redirectedArtUrls
   where
@@ -65,7 +60,7 @@ doMain build_id org_id creds = do
     fetchWithToken request = runReaderT (getWithToken request) creds
     failedJobs response = filter (("failed" ==) . state) $ jobs response
     artifactUrls = map artifactsUrl
-    getArtSummary u = runReaderT (printTestSummaries u) creds
+    getArtSummary u = runReaderT (fetchAndParseJsonResults u) creds
     fetchRedirected req = runReaderT (getRedirectTargets req) creds
 
 getWithToken :: (FromJSON a) => Request -> ReaderT Credentials IO (Maybe a)
@@ -82,27 +77,24 @@ getRedirectTargets request = do
   response <- liftIO (httpJSON noRedirectReq :: IO (Response Value))
   pure $ map snd $ filter ((== "Location") . fst) $ responseHeaders response
 
-extractTestsFromHtmlResponse :: BS.ByteString -> [TestRun]
-extractTestsFromHtmlResponse responseData =
-  let responseString = BS.unpack responseData
-      rows = lines responseString
-      failedTests = strip $ head $ filter (" FAILED_TESTS=[" `isInfixOf`) rows
-      stripped = replace ",]" "]" $ replace "];" "]" $ replace "FAILED_TESTS=" "" failedTests
-      validJson = BS.pack stripped
-   in fromJust (decode validJson :: Maybe [TestRun])
+fetchAndParseJsonResults :: ByteString -> ReaderT Credentials IO ()
+fetchAndParseJsonResults someUrl = do
+  liftIO $ putStrLn $ "Fetching " <> unpack someUrl
 
-printTestSummaries :: ByteString -> ReaderT Credentials IO ()
-printTestSummaries artUrl = do
-  liftIO $ putStrLn $ "Fetching " <> unpack artUrl
-  artRequest <- liftIO $ makeGetRequest $ unpack artUrl
+  artRequest <- liftIO $ makeGetRequest $ unpack someUrl
   user <- asks getUser
   password <- asks getPassword
+
   let reqWithAuth = setRequestBasicAuth user password artRequest
   response <- httpLBS reqWithAuth
 
   liftIO $ putStrLn $ "Fetched... " <> show (getResponseStatus response)
-  let tests = extractTestsFromHtmlResponse $ getResponseBody response
-   in mapM_ (liftIO . putStrLn . testName) tests
+
+  let tests = getResponseBody response
+      results = decode tests :: Maybe TestResults
+      testRuns = testResults $ fromJust results
+      failedTestRuns = filter ((== "FAIL") . testStatus) testRuns
+   in liftIO $ mapM_ print failedTestRuns
 
 main :: IO ()
 main = do

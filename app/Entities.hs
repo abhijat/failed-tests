@@ -4,7 +4,10 @@
 module Entities where
 
 import Data.Aeson
+import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.Aeson.Types (Parser)
+import qualified Data.ByteString.Lazy.Char8 as BS
+import Data.String.Utils (strip)
 
 data Resp = Resp
   { url :: String,
@@ -47,25 +50,54 @@ instance FromJSON Artifact where
     where
       makeArtifactParser o = Artifact <$> o .: "id" <*> o .: "job_id" <*> o .: "download_url" <*> o .: "state" <*> o .: "path"
 
+newtype TestResults = TestResults {testResults :: [TestRun]} deriving (Show)
+
+instance FromJSON TestResults where
+  parseJSON :: Value -> Parser TestResults
+  parseJSON = withObject "TestResults" go
+    where
+      go obj =
+        TestResults <$> obj .: "results"
+
 data TestRun = TestRun
-  { testName :: String,
-    testDescription :: String,
-    testRunTime :: String,
+  { testClass :: String,
+    testFunction :: String,
+    testModule :: String,
+    testInjectedArgs :: Value,
+    testResultsDir :: String,
+    testStatus :: String,
     testSummary :: String,
-    testResult :: String
+    testId :: String
   }
-  deriving (Show)
 
 instance FromJSON TestRun where
+  parseJSON :: Value -> Parser TestRun
   parseJSON = withObject "TestRun" f
     where
       f obj =
         TestRun
-          <$> obj .: "test_name"
-          <*> obj .: "description"
-          <*> obj .: "run_time"
+          <$> obj .: "cls_name"
+          <*> obj .: "function_name"
+          <*> obj .: "module_name"
+          <*> obj .: "injected_args"
+          <*> obj .: "results_dir"
+          <*> obj .: "test_status"
           <*> obj .: "summary"
-          <*> obj .: "test_result"
+          <*> obj .: "test_id"
+
+instance Show TestRun where
+  show t =
+    unlines pieces
+    where
+      pieces =
+        [ "=======================================================",
+          testClass t,
+          testModule t,
+          testFunction t,
+          BS.unpack (encodePretty $ testInjectedArgs t),
+          strip (testSummary t),
+          "======================================================="
+        ]
 
 data CmdOpts = CmdOpts
   { buildId :: String,

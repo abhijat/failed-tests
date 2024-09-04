@@ -30,21 +30,17 @@ buildPath build_id org_id = pack $ orgUrl <> build_id
 makeGetRequest :: String -> IO Request
 makeGetRequest = parseRequest . ("GET " <>)
 
-doMain :: String -> String -> Credentials -> IO ()
-doMain build_id org_id creds = do
+doMain :: String -> String -> Bool -> Credentials -> IO ()
+doMain build_id org_id print_concise creds = do
   do
     r <- makeGetRequest rootUrl
     let req = setRequestPath (buildPath build_id org_id) r
-
-    putStrLn $ "getting build details for " <> build_id
 
     decoded <- fetchWithToken req
     let failed = failedJobs <$> decoded
         artifacts = maybe [] artifactUrls failed
 
     putStrLn $ "Found " <> (show . length) artifacts <> " failed jobs"
-    mapM_ putStrLn artifacts
-
     artRequests <- mapM makeGetRequest artifacts
     artResponses <- mapM fetchWithToken artRequests
 
@@ -60,7 +56,7 @@ doMain build_id org_id creds = do
     fetchWithToken request = runReaderT (getWithToken request) creds
     failedJobs response = filter (("failed" ==) . state) $ jobs response
     artifactUrls = map artifactsUrl
-    getArtSummary u = runReaderT (fetchAndParseJsonResults u) creds
+    getArtSummary u = runReaderT (fetchAndParseJsonResults u print_concise) creds
     fetchRedirected req = runReaderT (getRedirectTargets req) creds
 
 getWithToken :: (FromJSON a) => Request -> ReaderT Credentials IO (Maybe a)
@@ -77,27 +73,27 @@ getRedirectTargets request = do
   response <- liftIO (httpJSON noRedirectReq :: IO (Response Value))
   pure $ map snd $ filter ((== "Location") . fst) $ responseHeaders response
 
-fetchAndParseJsonResults :: ByteString -> ReaderT Credentials IO ()
-fetchAndParseJsonResults someUrl = do
-  liftIO $ putStrLn $ "Fetching " <> unpack someUrl
-
+fetchAndParseJsonResults :: ByteString -> Bool -> ReaderT Credentials IO ()
+fetchAndParseJsonResults someUrl print_concise = do
   artRequest <- liftIO $ makeGetRequest $ unpack someUrl
   user <- asks getUser
   password <- asks getPassword
 
   let reqWithAuth = setRequestBasicAuth user password artRequest
   response <- httpLBS reqWithAuth
-
-  liftIO $ putStrLn $ "Fetched... " <> show (getResponseStatus response)
-
   let tests = getResponseBody response
       results = decode tests :: Maybe TestResults
       testRuns = testResults $ fromJust results
       failedTestRuns = filter ((== "FAIL") . testStatus) testRuns
-   in liftIO $ mapM_ print failedTestRuns
+   in liftIO $ mapM_ display failedTestRuns
+  where
+    display =
+      if print_concise
+        then putStrLn . testId
+        else print
 
 main :: IO ()
 main = do
   cmdOpts <- OA.execParser optParser
   creds <- loadCreds
-  doMain (buildId cmdOpts) (orgId cmdOpts) creds
+  doMain (buildId cmdOpts) (orgId cmdOpts) (printConcise cmdOpts) creds

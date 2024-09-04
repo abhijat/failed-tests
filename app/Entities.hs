@@ -102,6 +102,7 @@ instance Show TestRun where
 data CmdOpts = CmdOpts
   { buildId :: String,
     orgId :: String,
-    showAllResults :: Bool
+    showAllResults :: Bool,
+    printConcise :: Bool
   }
   deriving (Show)

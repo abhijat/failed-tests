@@ -35,6 +35,7 @@ buildOpts =
     <$> OA.strOption (OA.long "build-id" <> OA.short 'b' <> OA.metavar "BUILD_ID" <> OA.help "Buildkite build ID")
     <*> OA.strOption (OA.long "org" <> OA.short 'o' <> OA.metavar "ORG_ID" <> OA.help "Organization (redpanda|vtools)" <> OA.value "redpanda")
     <*> OA.switch (OA.long "show-all" <> OA.short 'a' <> OA.help "Whether to show all results or only the failed ones")
+    <*> OA.switch (OA.long "print-concise" <> OA.short 's' <> OA.help "Whether to show a condensed report")
 
 optParser :: OA.ParserInfo CmdOpts
 optParser =

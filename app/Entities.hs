@@ -69,6 +69,7 @@ instance FromJSON TestRun where
 
 data CmdOpts = CmdOpts
   { buildId :: String,
+    orgId :: String,
     showAllResults :: Bool
   }
   deriving (Show)

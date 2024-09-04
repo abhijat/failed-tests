@@ -74,7 +74,8 @@ executable failed-tests
         aeson,
         MissingH,
         optparse-applicative,
-        mtl
+        mtl,
+        regex-posix
 
     -- Directories containing source files.
     hs-source-dirs:   app

@@ -3,7 +3,7 @@
 module Main where
 
 import Control.Monad.Reader (ReaderT (runReaderT), asks, liftIO)
-import Credentials (Credentials, getPassword, getToken, getUser, loadCreds, optParser)
+import Credentials (Credentials, getPassword, getToken, getUser, loadCreds, loadEnvVars, optParser)
 import Data.Aeson (FromJSON, Value)
 import Data.Aeson.Decoding (decode)
 import Data.ByteString (ByteString)
@@ -94,6 +94,7 @@ fetchAndParseJsonResults someUrl print_concise = do
 
 main :: IO ()
 main = do
+  loadEnvVars
   cmdOpts <- OA.execParser optParser
   creds <- loadCreds
   doMain (buildId cmdOpts) (orgId cmdOpts) (printConcise cmdOpts) creds

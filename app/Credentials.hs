@@ -4,8 +4,11 @@ import Control.Applicative ((<**>))
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (pack)
 import Entities (CmdOpts (CmdOpts))
+import LoadEnv (loadEnvFromAbsolute)
 import qualified Options.Applicative as OA
+import System.Directory (getCurrentDirectory, getHomeDirectory)
 import System.Environment (getEnv)
+import System.FilePath ((</>))
 
 data Credentials = Credentials
   { bkToken :: String,
@@ -42,3 +45,13 @@ optParser =
   OA.info
     (buildOpts <**> OA.helper)
     (OA.fullDesc <> OA.progDesc "Summarize tests in a buildkite build!" <> OA.header "show-build-summary")
+
+loadEnvVars :: IO ()
+loadEnvVars = do
+  paths <- envFiles
+  mapM_ loadEnvFromAbsolute paths
+
+envFiles :: IO [FilePath]
+envFiles = do
+  dirs <- sequence [getHomeDirectory, getCurrentDirectory]
+  return $ map (</> ".ft-env") dirs

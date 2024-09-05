@@ -76,7 +76,10 @@ executable failed-tests
         MissingH,
         optparse-applicative,
         mtl,
-        regex-posix
+        regex-posix,
+        load-env,
+        filepath,
+        directory
 
     -- Directories containing source files.
     hs-source-dirs:   app
